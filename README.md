@@ -1,5 +1,5 @@
 # SeedMaker
-Creat SeedMaker folder on desptop add:
+Create SeedMaker folder on desptop add:
 SeedMaker.py 
 Wordlist.txt
 
@@ -8,8 +8,9 @@ Install Python
 
 Double click on SeedMaker.py file to open APP.
 
-
+Description:
 Python Script to run in Windows Terminal Creates a Kivy of SeedMaker APP for Bitcoin 12/24 Word Seed Phrase Generation. .   
+
 
 This builds a APP on your PC using Kivy. It was built by GROG3 Beta FREE Demo Version AI on x.com. I was just having a play this is what GROK3 came up with, i had to tell it what to do like 40 different rebiulds to get it right and functioning. It was an adictive and fun way to biuld a program with no knowledge of coding python scriptin langauge. 
 
