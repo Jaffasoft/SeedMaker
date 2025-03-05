@@ -1,0 +1,1110 @@
+
+# SeedMaker - Made by Jaffasoft and Grok3 Beta FREE
+# A Cryptographically Secure BIP-39 Seed Phrase Generator and Validator
+# =============================================================================
+# Overview:
+# SeedMaker is a Python application built with Kivy that generates and validates 
+# BIP-39 seed phrases (12 or 24 words) used for cryptocurrency wallets, particularly 
+# Bitcoin. It adheres to the BIP-39 standard, ensuring secure entropy generation, 
+# checksum calculation, and wordlist mapping using the official 2048-word list.
+#
+# Key Features:
+# - Generate 12 or 24-word seed phrases from random entropy or user input (bits, hex, dice rolls).
+# - Validate existing seed phrases with checksum verification.
+# - Provide detailed cryptographic breakdowns (entropy, checksum, binary, etc.).
+# - User-friendly interface with options to copy, hide, or clear seeds.
+# - Help and About screens for education and attribution.
+#
+# Security Enhancements:
+# - Uses os.urandom() for cryptographically secure random number generation.
+# - Avoids unnecessary external calls or suspicious behaviors that might trigger antivirus.
+# - Ensures proper file handling and resource cleanup to avoid memory leaks or flags.
+# - No network activity, reducing risk of being flagged as malicious.
+#
+# UI Enhancements:
+# - Removed Validate Seed button (auto-validation).
+# - Added Paste button at top of input fields.
+# - Single message panel with red (error) or light-to-darker green (valid) colors.
+# - Simplified messages to "Invalid X Word Seed Phrase" or "Valid X Word Seed Phrase".
+#
+# Dependencies:
+# - Python 3.13
+# - Kivy (GUI framework)
+# - PyInstaller (for creating .exe)
+# - wordlist.txt (BIP-39 English wordlist, 2048 words, must be bundled with executable)
+#
+# Usage:
+# - Run directly with Python: `python seedmaker.py`
+# - Or compile to .exe with PyInstaller: 
+#   `pyinstaller -F -w --add-data "wordlist.txt;." seedmaker.py`
+#
+# Notes:
+# - Ensure wordlist.txt is in the same directory as the script or bundled correctly.
+# - For maximum security, use offline on an air-gapped machine.
+# - Never share seed phrases online or with untrusted parties.
+
+
+# SeedMaker - Cryptographically Secure BIP-39 Seed Phrase Generator and Validator
+# =============================================================================
+from kivy.app import App
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
+from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
+from kivy.core.clipboard import Clipboard
+from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.graphics import Color, Rectangle
+from kivy.properties import ListProperty
+from kivy.graphics import Color, RoundedRectangle
+import hashlib
+import os
+import secrets
+import sys
+
+# Load BIP-39 wordlist securely
+try:
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    wordlist_path = os.path.join(base_path, "wordlist.txt")
+    with open(wordlist_path, "r", encoding='utf-8') as f:
+        wordlist = [line.strip() for line in f.readlines()]
+    if len(wordlist) != 2048:
+        raise ValueError(f"Wordlist must contain exactly 2048 words! Found {len(wordlist)}.")
+except FileNotFoundError:
+    print("Error: 'wordlist.txt' not found! Ensure it's bundled with the executable.")
+    sys.exit(1)
+
+# Utility functions
+def generate_bit_from_dice():
+    roll = secrets.randbelow(6) + 1
+    return roll, '0' if roll % 2 == 0 else '1'
+
+def generate_entropy_from_dice(num_bits):
+    return ''.join(generate_bit_from_dice()[1] for _ in range(num_bits))
+
+def dice_to_bits(dice_string):
+    return ''.join('0' if int(d) % 2 == 0 else '1' for d in dice_string if d in '123456')
+
+def random_hex_char():
+    return secrets.choice('0123456789abcdef')
+
+def generate_random_binary(num_bits):
+    return ''.join(str(secrets.randbits(1)) for _ in range(num_bits))
+
+def filter_binary(char, text):
+    return char if char in '01' else ''
+
+def filter_hex(char, text):
+    return char if char in '0123456789abcdefABCDEF' else ''
+
+def filter_dice(char, text):
+    return char if char in '123456' else ''
+
+
+class CustomButton(Button):
+    hover_color = ListProperty([0.2, 0.6, 0.89, 1])  # #3398E4 (Light Blue)
+    normal_color = ListProperty([0, 0.47, 0.83, 1])  # #0078D4 (Blue)
+    press_color = ListProperty([0, 0.36, 0.71, 1])  # #005BB5 (Dark Blue)
+
+    def __init__(self, **kwargs):
+        super(CustomButton, self).__init__(**kwargs)
+        self.background_normal = ''
+        self.background_color = self.normal_color
+        self.background_down = ''
+        self.color = [1, 1, 1, 1]  # White text
+        Window.bind(mouse_pos=self.on_mouse_pos)
+        self.bind(on_press=self.on_press_effect, on_release=self.on_release_effect)
+
+    def on_mouse_pos(self, *args):
+        if not self.disabled and self.collide_point(*self.to_widget(*args[1])):
+            self.background_color = self.hover_color
+        else:
+            self.background_color = self.normal_color
+
+    def on_press_effect(self, *args):
+        self.background_color = self.press_color
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*self.press_color)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[5])
+
+    def on_release_effect(self, *args):
+        self.background_color = self.hover_color if self.collide_point(*Window.mouse_pos) else self.normal_color
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*self.background_color)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[5])
+
+
+class BaseScreen(Screen):
+    def __init__(self, **kwargs):
+        super(BaseScreen, self).__init__(**kwargs)
+        self.content_layout = BoxLayout(orientation='vertical', padding=[20, 5, 20, 20], spacing=20, pos_hint={'top': 0.98}, size_hint_y=0.93)
+        self.add_widget(self.content_layout)
+
+        self.dropdown = DropDown()
+        self.options = [
+            "Make a 12 Word Seed Phrase", "Make a 24 Word Seed Phrase",
+            "Validate Your 12 Words", "Validate Your 24 Words",
+            "Input 128 Bits", "Input 256 Bits", "128 Dice", "256 Dice",
+            "Input Own 128 Dice", "Input Own 256 Dice",
+            "32 Hex", "64 Hex", "Help", "About"
+        ]
+        for option in self.options:
+            btn = CustomButton(text=f"[b]{option}[/b]", markup=True, size_hint_y=None, height=50, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), font_size=18)
+            btn.bind(on_release=lambda btn, opt=option: self.dropdown_select(opt))
+            btn.canvas.before.clear()
+            self.dropdown.add_widget(btn)
+
+        self.menu_btn = CustomButton(text="[b]Options[/b]", markup=True, font_size=24, size_hint=(1, 0.07), pos_hint={'top': 1.0}, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1))
+        self.menu_btn.bind(on_release=lambda instance: self.dropdown.open(instance))
+        self.menu_btn.canvas.before.clear()
+        self.add_widget(self.menu_btn)
+
+    def dropdown_select(self, option):
+        self.dropdown.dismiss()
+        self.manager.current = option.lower().replace(" ", "_")
+
+class SeedScreen(BaseScreen):
+    def __init__(self, button_text, action=None, **kwargs):
+        super(SeedScreen, self).__init__(**kwargs)
+        self.action = action
+        self.words_hidden = False
+        self.original_text = ""
+        self.details_data = {}
+
+        desc_text = "128 Random Entropy Bits" if button_text == "Make a 12 Word Seed Phrase" else "256 Random Entropy Bits"
+        self.desc_label = Label(text=desc_text, size_hint_y=None, height=30, font_size=20)
+        self.content_layout.add_widget(self.desc_label)
+
+        if button_text and action:
+            self.generate_btn = CustomButton(text=f"[b]{button_text}[/b]", markup=True, font_size=36, size_hint=(1, None), height=75, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.generate_seed)
+            self.generate_btn.canvas.before.clear()
+            self.content_layout.add_widget(self.generate_btn)
+
+        self.scroll = ScrollView(size_hint_y=None, height=200)
+        self.seed_label = Label(text="", halign="center", valign="middle", size_hint_y=None, text_size=(Window.width - 40, None), font_size=36, color=(1, 1, 1, 1))
+        self.seed_label.bind(texture_size=self.seed_label.setter('size'))
+        self.scroll.add_widget(self.seed_label)
+        self.content_layout.add_widget(self.scroll)
+
+        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        self.clear_btn = CustomButton(text="Clear", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.clear_seed)
+        self.clear_btn.canvas.before.clear()
+        button_layout.add_widget(self.clear_btn)
+        
+        self.hide_show_btn = CustomButton(text="Hide", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.toggle_words, opacity=0, disabled=True)
+        self.hide_show_btn.canvas.before.clear()
+        button_layout.add_widget(self.hide_show_btn)
+        
+        self.copy_btn = CustomButton(text="Copy", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.copy_seed, opacity=0, disabled=True)
+        self.copy_btn.canvas.before.clear()
+        button_layout.add_widget(self.copy_btn)
+        
+        self.content_layout.add_widget(button_layout)
+
+        self.details_btn = CustomButton(text="Show Details", font_size=24, size_hint=(1, None), height=50, background_color=(0, 1, 0, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.show_details, opacity=0, disabled=True)
+        self.details_btn.canvas.before.clear()
+        self.content_layout.add_widget(self.details_btn)
+
+    def generate_seed(self, instance):
+      try:
+          # Generate entropy first
+          byte_length = 16 if self.name == 'make_a_12_word_seed_phrase' else 32
+          entropy_bytes = os.urandom(byte_length)  # Random entropy
+          custom_binary = bin(int.from_bytes(entropy_bytes, 'big'))[2:].zfill(byte_length * 8)
+          
+          # Calculate checksum and full binary
+          entropy_hex = entropy_bytes.hex()
+          sha256_hash = hashlib.sha256(entropy_bytes).hexdigest()
+          checksum_bits = 4 if byte_length == 16 else 8
+          checksum_hex = sha256_hash[:1 if byte_length == 16 else 2]
+          checksum_binary = bin(int(checksum_hex, 16))[2:].zfill(checksum_bits)
+          full_binary = custom_binary + checksum_binary
+          
+          # Generate words from the same entropy
+          word_indices = [int(full_binary[i:i+11], 2) for i in range(0, len(full_binary), 11) if len(full_binary[i:i+11]) == 11]
+          words = [wordlist[idx] for idx in word_indices]
+          words_per_line = 4 if self.name == 'make_a_12_word_seed_phrase' else 6
+          seed_phrase = '\n'.join([' '.join(words[i:i+words_per_line]) for i in range(0, len(words), words_per_line)])
+          
+          # Display the seed
+          self.seed_label.text = seed_phrase
+          self.original_text = seed_phrase
+          
+          # Store details using the same entropy
+          self.details_data = {
+              "seed_phrase": seed_phrase.replace('\n', ' '),
+              "entropy_binary": custom_binary,
+              "entropy_hex": entropy_hex,
+              "checksum_binary": checksum_binary,
+              "checksum_hex": checksum_hex,
+              "full_binary": full_binary,
+              "sha256_hash": sha256_hash,
+              "word_indices": ' '.join(map(str, word_indices))
+          }
+          for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+              btn.opacity = 1
+              btn.disabled = False
+          self.hide_show_btn.text = "Hide"
+          self.words_hidden = False
+      except Exception as e:
+          self.seed_label.text = f"Error: {str(e)}"
+
+    def copy_seed(self, instance):
+        Clipboard.copy(self.seed_label.text.replace('\n', ' '))
+
+    def clear_seed(self, instance):
+        self.seed_label.text = ""
+        self.original_text = ""
+        self.details_data = {}
+        for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+            btn.opacity = 0
+            btn.disabled = True
+
+    def toggle_words(self, instance):
+        if not self.original_text:
+            return
+        self.words_hidden = not self.words_hidden
+        self.seed_label.text = "Hidden Seed Phrase" if self.words_hidden else self.original_text
+        self.hide_show_btn.text = "Show" if self.words_hidden else "Hide"
+
+    def show_details(self, instance):
+        details_screen = self.manager.get_screen('details')
+        details_screen.update_details(self.details_data, self.name)
+        self.manager.current = 'details'
+
+class InputScreen(BaseScreen):
+    def __init__(self, input_type, max_length, **kwargs):
+        super(InputScreen, self).__init__(**kwargs)
+        self.input_type = input_type
+        self.max_length = max_length
+        self.words_hidden = False
+        self.original_text = ""
+        self.details_data = {}
+        self.random_event = None
+
+        desc_text = f"Enter {'32' if max_length == 32 else '64'} Random Hex Chars" if 'hex' in input_type else f"Enter {max_length} Random Bits"
+        self.desc_label = Label(text=desc_text, size_hint_y=None, height=30, font_size=20)
+        self.content_layout.add_widget(self.desc_label)
+
+        self.input_field = TextInput(hint_text=f"Enter {max_length} Bits of 1s & 0s" if 'bits' in input_type else f"Enter exactly {max_length} hex chars", multiline='bits' not in input_type, size_hint_y=None, height=50 if 'hex' in input_type else 180, input_filter=filter_binary if 'bits' in input_type else filter_hex)
+        self.input_field.bind(text=self.update_count)
+        self.content_layout.add_widget(self.input_field)
+
+        self.count_label = Label(text=f"{'Hex' if 'hex' in self.input_type else 'Bits'}: 0 of {self.max_length}", font_size=24, size_hint_y=None, height=30)
+        self.content_layout.add_widget(self.count_label)
+
+        button_text = "[b]Make Seed[/b]" if 'hex' in input_type else f"[b]Make {'12' if max_length == 128 else '24'} Word Seed[/b]"
+        self.submit_btn = CustomButton(text=button_text, markup=True, font_size=36, size_hint=(1, None), height=75, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.generate_from_input)
+        self.submit_btn.canvas.before.clear()
+        self.content_layout.add_widget(self.submit_btn)
+
+        self.random_btn = CustomButton(text=f"Add Random {'HEX' if 'hex' in input_type else 'Bits'}", font_size=24, size_hint=(1, None), height=50, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.start_random_input, on_release=self.stop_random_input)
+        self.random_btn.canvas.before.clear()
+        self.content_layout.add_widget(self.random_btn)
+
+        self.scroll = ScrollView(size_hint_y=None, height=100)
+        self.seed_label = Label(text="", halign="center", valign="top", size_hint_y=None, text_size=(Window.width - 40, None), font_size=36, color=(1, 1, 1, 1))
+        self.seed_label.bind(texture_size=self.seed_label.setter('size'))
+        self.scroll.add_widget(self.seed_label)
+        self.content_layout.add_widget(self.scroll)
+
+        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        self.clear_btn = Button(text="Clear", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.clear_input)
+        self.clear_btn.canvas.before.clear()
+        button_layout.add_widget(self.clear_btn)
+        
+        self.hide_show_btn = CustomButton(text="Hide", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.toggle_words, opacity=0, disabled=True)
+        self.hide_show_btn.canvas.before.clear()
+        button_layout.add_widget(self.hide_show_btn)
+        
+        self.copy_btn = CustomButton(text="Copy", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.copy_seed, opacity=0, disabled=True)
+        self.copy_btn.canvas.before.clear()
+        button_layout.add_widget(self.copy_btn)
+        
+        self.content_layout.add_widget(button_layout)
+
+        self.details_btn = CustomButton(text="Show Details", font_size=24, size_hint=(1, None), height=50, background_color=(0, 1, 0, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.show_details, opacity=0, disabled=True)
+        self.details_btn.canvas.before.clear()
+        self.content_layout.add_widget(self.details_btn)
+
+    def update_count(self, instance, value):
+        count = len(value.strip().replace('\n', '')) if 'bits' in self.input_type else len(value.strip())
+        self.count_label.text = f"{'Hex' if 'hex' in self.input_type else 'Bits'}: {count} of {self.max_length}"
+        if count > self.max_length:
+            instance.text = value[:self.max_length]
+
+    def start_random_input(self, instance):
+        if len(self.input_field.text.strip()) < self.max_length and not self.random_event:
+            self.random_event = Clock.schedule_interval(self.append_random_input, 0.1)
+
+    def stop_random_input(self, instance):
+        if self.random_event:
+            self.random_event.cancel()
+            self.random_event = None
+
+    def append_random_input(self, dt):
+        current_text = self.input_field.text.strip()
+        if len(current_text) < self.max_length:
+            char = random_hex_char() if 'hex' in self.input_type else str(secrets.randbits(1))
+            self.input_field.text = current_text + char
+            self.generate_from_input(None)
+        else:
+            self.stop_random_input(None)
+    
+    def generate_from_input(self, instance):
+        user_input = self.input_field.text.strip().replace('\n', '') if 'bits' in self.input_type else self.input_field.text.strip()
+        if len(user_input) != self.max_length:
+            self.seed_label.text = f"Enter {'Hex' if 'hex' in self.input_type else 'Bits'}"
+            return
+        try:
+            byte_length = 16 if self.max_length in [32, 128] else 32
+            if 'hex' in self.input_type:
+                entropy_bytes = bytes.fromhex(user_input)
+                custom_binary = bin(int.from_bytes(entropy_bytes, 'big'))[2:].zfill(byte_length * 8)
+            else:
+                custom_binary = user_input
+                entropy_bytes = int(custom_binary, 2).to_bytes(byte_length, 'big')
+            
+            entropy_hex = entropy_bytes.hex()
+            sha256_hash = hashlib.sha256(entropy_bytes).hexdigest()
+            checksum_bits = 4 if byte_length == 16 else 8
+            checksum_hex = sha256_hash[:1 if byte_length == 16 else 2]
+            checksum_binary = bin(int(checksum_hex, 16))[2:].zfill(checksum_bits)
+            full_binary = custom_binary + checksum_binary
+            word_indices = [int(full_binary[i:i+11], 2) for i in range(0, len(full_binary), 11) if len(full_binary[i:i+11]) == 11]
+            words = [wordlist[idx] for idx in word_indices]
+            words_per_line = 4 if len(words) == 12 else 6
+            seed_phrase = '\n'.join([' '.join(words[i:i+words_per_line]) for i in range(0, len(words), words_per_line)])
+            self.seed_label.text = seed_phrase
+            self.original_text = seed_phrase
+            
+            self.details_data = {
+                "seed_phrase": seed_phrase.replace('\n', ' '),
+                "entropy_binary": custom_binary,
+                "entropy_hex": entropy_hex,
+                "checksum_binary": checksum_binary,
+                "checksum_hex": checksum_hex,
+                "full_binary": full_binary,
+                "sha256_hash": sha256_hash,
+                "word_indices": ' '.join(map(str, word_indices))
+            }
+            for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+                btn.opacity = 1
+                btn.disabled = False
+            self.hide_show_btn.text = "Hide"
+            self.words_hidden = False
+        except Exception as e:
+            self.seed_label.text = f"Error: Invalid input ({e})"
+
+    def copy_seed(self, instance):
+        Clipboard.copy(self.seed_label.text.replace('\n', ' '))
+
+    def clear_input(self, instance):
+        self.input_field.text = ""
+        self.seed_label.text = ""
+        self.original_text = ""
+        self.details_data = {}
+        self.count_label.text = f"{'Hex' if 'hex' in self.input_type else 'Bits'}: 0 of {self.max_length}"
+        for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+            btn.opacity = 0
+            btn.disabled = True
+        if self.random_event:
+            self.random_event.cancel()
+            self.random_event = None
+
+    def toggle_words(self, instance):
+        if not self.original_text:
+            return
+        self.words_hidden = not self.words_hidden
+        self.seed_label.text = "Hidden Seed Phrase" if self.words_hidden else self.original_text
+        self.hide_show_btn.text = "Show" if self.words_hidden else "Hide"
+
+    def show_details(self, instance):
+        details_screen = self.manager.get_screen('details')
+        details_screen.update_details(self.details_data, self.name)
+        self.manager.current = 'details'
+
+class DiceScreen(BaseScreen):
+    def __init__(self, max_length, input_own=False, **kwargs):
+        super(DiceScreen, self).__init__(**kwargs)
+        self.max_length = max_length
+        self.input_own = input_own
+        self.words_hidden = False
+        self.original_text = ""
+        self.last_roll = None
+        self.roll_event = None
+        self.dice_rolls = []
+        self.details_data = {}
+
+        # Main layout with fixed header and scrollable content
+        self.main_layout = BoxLayout(orientation='vertical', size_hint=(1, 1))
+
+        # Fixed header
+        self.header_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=100)
+        self.header_layout.add_widget(Label(size_hint_y=None, height=50))
+        self.title_label = Label(text="[b]SeedMaker[/b]", markup=True, font_size=36, size_hint_y=None, height=50, color=(1, 1, 1, 1))
+        self.header_layout.add_widget(self.title_label)
+        self.main_layout.add_widget(self.header_layout)
+
+        # Scrollable content
+        self.scroll = ScrollView(size_hint=(1, None), height=Window.height - 150)
+        self.scroll_content = BoxLayout(orientation='vertical', size_hint_y=None, spacing=10, padding=[10, 10, 10, 10])
+        self.scroll_content.bind(minimum_height=self.scroll_content.setter('height'))
+        self.scroll.add_widget(self.scroll_content)
+        self.main_layout.add_widget(self.scroll)
+
+        self.add_widget(self.main_layout)
+
+        # Populate scrollable content
+        desc_text = f"{max_length} Random Entropy Dice Rolls" if not input_own else f"Input Your Own {max_length} Dice Rolls"
+        self.desc_label = Label(text=desc_text, size_hint_y=None, height=30, font_size=20)
+        self.scroll_content.add_widget(self.desc_label)
+
+        dice_rolls_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=100)
+        self.dice_rolls_field = TextInput(hint_text=f"Dice rolls (e.g., 654233435242516)", multiline=True, size_hint=(0.75, None), height=100, readonly=not input_own, font_size=14, input_filter=filter_dice if input_own else None)
+        if input_own:
+            self.dice_rolls_field.bind(text=self.update_from_input)
+        dice_rolls_layout.add_widget(self.dice_rolls_field)
+        self.copy_dice_btn = CustomButton(text="Copy Dice Rolls", font_size=24, size_hint=(None, None), width=188, height=50, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.copy_dice_rolls, opacity=0, disabled=True, pos_hint={'right': 1})
+        self.copy_dice_btn.canvas.before.clear()
+        dice_rolls_layout.add_widget(self.copy_dice_btn)
+        self.scroll_content.add_widget(dice_rolls_layout)
+
+        bits_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=100)
+        self.input_field = TextInput(hint_text=f"Bits from {max_length} dice rolls", multiline=True, size_hint=(0.75, None), height=100, readonly=True)
+        bits_layout.add_widget(self.input_field)
+        self.copy_bits_btn = CustomButton(text="Copy Bits", font_size=24, size_hint=(None, None), width=188, height=50, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.copy_bits, opacity=0, disabled=True, pos_hint={'right': 1})
+        self.copy_bits_btn.canvas.before.clear()
+        bits_layout.add_widget(self.copy_bits_btn)
+        self.scroll_content.add_widget(bits_layout)
+
+        self.count_label = Label(text=f"Dice Rolls: 0 of {self.max_length}", font_size=24, size_hint_y=None, height=30)
+        self.scroll_content.add_widget(self.count_label)
+
+        if not input_own:
+            self.roll_btn = CustomButton(text="Roll", font_size=24, size_hint=(1, None), height=50, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.start_roll_dice, on_release=self.stop_roll_dice)
+            self.roll_btn.canvas.before.clear()
+            self.scroll_content.add_widget(self.roll_btn)
+
+        self.submit_btn = CustomButton(text=f"[b]Show {'12' if max_length == 128 else '24'} Word Seed Phrase[/b]", markup=True, font_size=36, size_hint=(1, None), height=75, background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.generate_from_input)
+        self.submit_btn.canvas.before.clear()
+        self.scroll_content.add_widget(self.submit_btn)
+
+        self.seed_scroll = ScrollView(size_hint_y=None, height=200)
+        self.seed_label = Label(text="", halign="center", valign="top", size_hint_y=None, text_size=(Window.width - 40, None), font_size=36, color=(1, 1, 1, 1))
+        self.seed_label.bind(texture_size=self.seed_label.setter('size'))
+        self.seed_scroll.add_widget(self.seed_label)
+        self.scroll_content.add_widget(self.seed_scroll)
+
+        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        self.clear_btn = CustomButton(text="Clear", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.clear_input)
+        self.clear_btn.canvas.before.clear()
+        button_layout.add_widget(self.clear_btn)
+        
+        self.hide_show_btn = CustomButton(text="Hide", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.toggle_words, opacity=0, disabled=True)
+        self.hide_show_btn.canvas.before.clear()
+        button_layout.add_widget(self.hide_show_btn)
+        
+        self.copy_btn = CustomButton(text="Copy", font_size=24, size_hint=(0.33, 1), background_color=(0.53, 0.81, 0.92, 1), background_normal='', color=(0, 0, 0, 1), on_press=self.copy_seed, opacity=0, disabled=True)
+        self.copy_btn.canvas.before.clear()
+        button_layout.add_widget(self.copy_btn)
+        self.scroll_content.add_widget(button_layout)
+
+        self.details_btn = CustomButton(text="Show Details", font_size=24, size_hint=(1, None), height=50, normal_color=[0, 1, 0, 1], hover_color=[0.2, 1, 0.2, 1], press_color=[0, 0.8, 0, 1], on_press=self.show_details, opacity=0, disabled=True)
+        self.details_btn.canvas.before.clear()
+        self.scroll_content.add_widget(self.details_btn)
+
+    def start_roll_dice(self, instance):
+        if len(self.dice_rolls_field.text.strip()) < self.max_length and not self.roll_event:
+            self.roll_event = Clock.schedule_interval(self.roll_dice, 0.1)
+
+    def stop_roll_dice(self, instance):
+        if self.roll_event:
+            self.roll_event.cancel()
+            self.roll_event = None
+
+    def roll_dice(self, dt):
+        current_text = self.dice_rolls_field.text.strip()
+        if len(current_text) < self.max_length:
+            roll = secrets.randbelow(6) + 1  # 1-6
+            self.last_roll = roll
+            self.dice_rolls.append(str(roll))
+            self.dice_rolls_field.text = ''.join(self.dice_rolls)
+            self.count_label.text = f"Dice Rolls: {len(self.dice_rolls)} of {self.max_length}"
+            self.copy_dice_btn.opacity = 1
+            self.copy_dice_btn.disabled = False
+            self.copy_bits_btn.opacity = 1
+            self.copy_bits_btn.disabled = False
+            if len(self.dice_rolls) == self.max_length:  # Generate only when full
+                self.generate_from_input(None)
+
+    def update_from_input(self, instance, value):
+        dice_input = value.strip().replace('\n', '')
+        if len(dice_input) > self.max_length:
+            instance.text = dice_input[:self.max_length]
+            dice_input = dice_input[:self.max_length]
+        self.dice_rolls = list(dice_input)
+        self.count_label.text = f"Dice Rolls: {len(dice_input)} of {self.max_length}"
+        self.copy_dice_btn.opacity = 1 if dice_input else 0
+        self.copy_dice_btn.disabled = not bool(dice_input)
+        self.copy_bits_btn.opacity = 1 if dice_input else 0
+        self.copy_bits_btn.disabled = not bool(dice_input)
+        if len(dice_input) == self.max_length:  # Generate only when full
+            self.generate_from_input(None)
+
+    def generate_from_input(self, instance):
+        dice_input = self.dice_rolls_field.text.strip().replace('\n', '')
+        if not dice_input or len(dice_input) != self.max_length:
+            self.seed_label.text = "Press Roll button" if not self.input_own else f"Enter {self.max_length} dice rolls"
+            return
+        try:
+            # Adjust dice rolls (1-6) to base-6 digits (0-5)
+            adjusted_input = ''.join(str(int(d) - 1) for d in dice_input)  # 1-6 becomes 0-5
+            # Convert to base-6 number
+            base6_number = 0
+            for digit in adjusted_input:
+                base6_number = base6_number * 6 + int(digit)
+            # Full binary representation
+            full_binary = bin(base6_number)[2:]  # Remove '0b'
+            byte_length = 16 if self.max_length == 128 else 32
+            # Pad to at least 128/256 bits, take last bits (LSB)
+            full_binary = full_binary.zfill(max(byte_length * 8, len(full_binary)))
+            custom_binary = full_binary[-byte_length * 8:]  # Last 128 or 256 bits
+            
+            # Update input_field for display
+            self.input_field.text = custom_binary
+            
+            # BIP-39 process
+            entropy_bytes = int(custom_binary, 2).to_bytes(byte_length, 'big')
+            entropy_hex = entropy_bytes.hex()
+            sha256_hash = hashlib.sha256(entropy_bytes).hexdigest()
+            checksum_bits = 4 if byte_length == 16 else 8
+            checksum_hex = sha256_hash[:1 if byte_length == 16 else 2]
+            checksum_binary = bin(int(checksum_hex, 16))[2:].zfill(checksum_bits)
+            full_binary = custom_binary + checksum_binary
+            word_indices = [int(full_binary[i:i+11], 2) for i in range(0, len(full_binary), 11) if len(full_binary[i:i+11]) == 11]
+            words = [wordlist[idx] for idx in word_indices]
+            words_per_line = 4 if self.max_length == 128 else 6
+            seed_phrase = '\n'.join([' '.join(words[i:i+words_per_line]) for i in range(0, len(words), words_per_line)])
+            
+            self.seed_label.text = seed_phrase
+            self.original_text = seed_phrase
+            
+            self.details_data = {
+                "seed_phrase": seed_phrase.replace('\n', ' '),
+                "dice_rolls": dice_input,
+                "entropy_binary": custom_binary,
+                "entropy_hex": entropy_hex,
+                "checksum_binary": checksum_binary,
+                "checksum_hex": checksum_hex,
+                "full_binary": full_binary,
+                "sha256_hash": sha256_hash,
+                "word_indices": ' '.join(map(str, word_indices))
+            }
+            for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+                btn.opacity = 1
+                btn.disabled = False
+            self.hide_show_btn.text = "Hide"
+            self.words_hidden = False
+        except Exception as e:
+            self.seed_label.text = f"Error: {str(e)}"
+
+    def copy_seed(self, instance):
+        Clipboard.copy(self.seed_label.text.replace('\n', ' '))
+
+    def copy_dice_rolls(self, instance):
+        Clipboard.copy(self.dice_rolls_field.text)
+
+    def copy_bits(self, instance):
+        Clipboard.copy(self.input_field.text.replace('\n', ''))
+
+    def clear_input(self, instance):
+        self.input_field.text = ""
+        self.dice_rolls_field.text = ""
+        self.dice_rolls = []
+        self.seed_label.text = ""
+        self.original_text = ""
+        self.details_data = {}
+        self.count_label.text = f"Dice Rolls: 0 of {self.max_length}"
+        for btn in [self.copy_btn, self.hide_show_btn, self.details_btn, self.copy_dice_btn, self.copy_bits_btn]:
+            btn.opacity = 0
+            btn.disabled = True
+        self.last_roll = None
+        if self.roll_event:
+            self.roll_event.cancel()
+            self.roll_event = None
+
+    def toggle_words(self, instance):
+        if not self.original_text:
+            return
+        self.words_hidden = not self.words_hidden
+        self.seed_label.text = "Hidden Seed Phrase" if self.words_hidden else self.original_text
+        self.hide_show_btn.text = "Show" if self.words_hidden else "Hide"
+
+    def show_details(self, instance):
+        details_screen = self.manager.get_screen('details')
+        details_screen.update_details(self.details_data, self.name)
+        self.manager.current = 'details'
+
+class WordEntryScreen(BaseScreen):
+    def __init__(self, word_count, **kwargs):
+        super(WordEntryScreen, self).__init__(**kwargs)
+        self.word_count = word_count
+        self.words_hidden = False
+        self.original_text = ""
+        self.details_data = {}
+
+        self.content_layout.padding = [20, 40, 20, 20]
+
+        self.desc_label = Label(text=f"Validate {word_count} Word Seed Phrase", size_hint_y=None, height=30, font_size=20)
+        self.content_layout.add_widget(self.desc_label)
+
+        paste_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=40, spacing=10)
+        self.paste_btn = CustomButton(text="[b]Paste[/b]", markup=True, font_size=24, size_hint=(0.25, None), height=40, on_press=self.paste_seed)
+        paste_layout.add_widget(self.paste_btn)
+        
+        self.paste_label = Label(text=f"Validate Mnemonic (BIP39) {word_count} Word Seed Phrase", size_hint=(0.75, None), height=40, font_size=16)
+        paste_layout.add_widget(self.paste_label)
+        self.content_layout.add_widget(paste_layout)
+
+        self.input_fields = []
+        self.suggestion_dropdowns = []
+        rows = 3 if word_count == 12 else 6
+        for i in range(rows):
+            row_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=30, spacing=5)
+            for j in range(4):
+                idx = i * 4 + j
+                if idx < word_count:
+                    hint_text = "Checksum Word" if idx == word_count - 1 else f"Word {idx + 1}"
+                    input_field = TextInput(multiline=False, size_hint=(0.25, 1), font_size=14, hint_text=hint_text)
+                    input_field.bind(text=self.on_text, focus=self.on_focus)
+                    self.input_fields.append(input_field)
+                    row_layout.add_widget(input_field)
+                    self.suggestion_dropdowns.append(DropDown())
+            self.content_layout.add_widget(row_layout)
+
+        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        self.clear_btn = CustomButton(text="Clear", font_size=24, size_hint=(0.33, 1), on_press=self.clear_input)
+        button_layout.add_widget(self.clear_btn)
+        
+        self.hide_show_btn = CustomButton(text="Hide", font_size=24, size_hint=(0.33, 1), on_press=self.toggle_words, opacity=0, disabled=True)
+        button_layout.add_widget(self.hide_show_btn)
+        
+        self.copy_btn = CustomButton(text="Copy", font_size=24, size_hint=(0.33, 1), on_press=self.copy_seed, opacity=0, disabled=True)
+        button_layout.add_widget(self.copy_btn)
+        
+        self.content_layout.add_widget(button_layout)
+
+        self.message_panel = BoxLayout(size_hint_y=None, height=40)
+        self.message_label = Label(text="", font_size=18, color=(1, 1, 1, 1))
+        self.message_panel.add_widget(self.message_label)
+        with self.message_panel.canvas.before:
+            Color(0, 0, 0, 1)
+            self.message_bg = Rectangle(pos=self.message_panel.pos, size=self.message_panel.size)
+        self.content_layout.add_widget(self.message_panel)
+
+        self.scroll = ScrollView(size_hint_y=None, height=200)
+        self.seed_label = Label(text="", halign="center", valign="top", size_hint_y=None, text_size=(Window.width - 40, None), font_size=36, color=(1, 1, 1, 1))
+        self.seed_label.bind(texture_size=self.seed_label.setter('size'))
+        self.scroll.add_widget(self.seed_label)
+        self.content_layout.add_widget(self.scroll)
+
+        self.details_btn = CustomButton(text="Show Details", font_size=24, size_hint=(1, None), height=50, normal_color=[0, 0.6, 0, 1], hover_color=[0.2, 0.8, 0.2, 1], press_color=[0, 0.4, 0, 1], on_press=self.show_details, opacity=0, disabled=True)
+        self.content_layout.add_widget(self.details_btn)
+
+        Clock.schedule_once(self.set_initial_focus, 0.1)
+
+    def set_initial_focus(self, dt):
+        if self.input_fields:
+            self.input_fields[0].focus = True
+
+    def paste_seed(self, instance):
+        pasted_text = Clipboard.paste().strip()
+        words = pasted_text.split()
+        if len(words) >= self.word_count:
+            for i, word in enumerate(words[:self.word_count]):
+                self.input_fields[i].text = word.strip()
+        self.validate_as_you_type()
+
+    def adjust_dropdown_position(self, dropdown, widget):
+        widget_top = widget.to_window(0, widget.top)[1]
+        dropdown.height = min(len(dropdown.children) * 30, 150)
+        dropdown.pos = (widget.x, widget_top - dropdown.height)
+
+    def update_message_panel(self, text, is_valid=False):
+        self.message_label.text = text
+        self.message_panel.canvas.before.clear()
+        with self.message_panel.canvas.before:
+            Color(1, 0, 0, 1) if not is_valid else Color(0.2, 0.8, 0.2, 1)
+            self.message_bg = Rectangle(pos=self.message_panel.pos, size=self.message_panel.size)
+
+    def on_text(self, instance, value):
+        idx = self.input_fields.index(instance)
+        dropdown = self.suggestion_dropdowns[idx]
+        dropdown.clear_widgets()
+
+        if idx == 0 and ' ' in value:
+            words = value.strip().split()
+            for i, word in enumerate(words[:self.word_count]):
+                if i < len(self.input_fields):
+                    self.input_fields[i].text = word.strip()
+            instance.text = words[0].strip() if words else ""
+            self.validate_as_you_type()
+            return
+
+        value = value.strip().lower()
+        if value:
+            if idx == self.word_count - 1:
+                prior_words = [f.text.strip().lower() for f in self.input_fields[:-1]]
+                if all(prior_words) and all(w in wordlist for w in prior_words):
+                    valid_last_words = self.get_valid_last_words(prior_words)
+                    matches = [w for w in valid_last_words if w.startswith(value)]
+                else:
+                    matches = []
+            else:
+                matches = [w for w in wordlist if w.startswith(value)][:5]
+            for match in sorted(matches, key=str.lower):
+                btn = CustomButton(text=match, size_hint_y=None, height=30, font_size=16, on_release=lambda btn, m=match: self.select_suggestion(instance, m, dropdown))
+                dropdown.add_widget(btn)
+        self.validate_as_you_type()
+
+    def on_focus(self, instance, value):
+        idx = self.input_fields.index(instance)
+        if value and self.manager.current == self.name:
+            dropdown = self.suggestion_dropdowns[idx]
+            if dropdown.parent:
+                dropdown.dismiss()
+            if dropdown.children:
+                self.adjust_dropdown_position(dropdown, instance)
+                dropdown.open(instance)
+
+    def select_suggestion(self, instance, word, dropdown):
+        instance.text = word
+        dropdown.dismiss()
+        self.validate_as_you_type()
+        instance.focus = True
+
+    def get_valid_last_words(self, prior_words):
+        bits_string = ''
+        for word in prior_words:
+            decimal_index = wordlist.index(word)
+            binary_index = bin(decimal_index)[2:].zfill(11)
+            bits_string += binary_index
+
+        if len(bits_string) != (self.word_count - 1) * 11:
+            return []
+
+        entropy_bits = 128 if self.word_count == 12 else 256
+        checksum_bits = 4 if self.word_count == 12 else 8
+        variable_bits = 7 if self.word_count == 12 else 3
+
+        import itertools
+        combos = itertools.product(['0', '1'], repeat=variable_bits)
+        combos = [''.join(list(i)) for i in combos]
+        valid_words = []
+
+        for combo in combos:
+            entropy = f'{bits_string}{combo}'
+            entropy_bytes = int(entropy, 2).to_bytes(entropy_bits // 8, 'big')
+            hs = hashlib.sha256(entropy_bytes).hexdigest()
+            checksum = bin(int(hs[0], 16))[2:].zfill(4)[:checksum_bits]
+            last_word_bin = f'{checksum}{combo}'
+            word_idx = int(last_word_bin, 2)
+            if word_idx < 2048:
+                valid_words.append(wordlist[word_idx])
+
+        return sorted(valid_words, key=str.lower)
+
+    def validate_as_you_type(self):
+        words = [field.text.strip().lower() for field in self.input_fields]
+        filled_words = [w for w in words if w]
+
+        if len(filled_words) < self.word_count:
+            self.update_message_panel(f"Invalid {self.word_count} Word Seed Phrase")
+            return
+
+        invalid_words = [w for w in words if w and w not in wordlist]
+        if invalid_words:
+            self.update_message_panel(f"Invalid {self.word_count} Word Seed Phrase")
+            return
+
+        bits_string = ''
+        for word in words:
+            decimal_index = wordlist.index(word)
+            binary_index = bin(decimal_index)[2:].zfill(11)
+            bits_string += binary_index
+
+        entropy_bits = 128 if self.word_count == 12 else 256
+        checksum_bits = 4 if self.word_count == 12 else 8
+        entropy_binary = bits_string[:entropy_bits]
+        provided_checksum = bits_string[entropy_bits:]
+        entropy_bytes = int(entropy_binary, 2).to_bytes(entropy_bits // 8, 'big')
+        sha256_hash = hashlib.sha256(entropy_bytes).hexdigest()
+        expected_checksum = ''.join([str(bin(int(sha256_hash[i], 16))[2:].zfill(4)) for i in range(checksum_bits // 4)])[:checksum_bits]
+
+        if provided_checksum == expected_checksum:
+            self.update_message_panel(f"Valid {self.word_count} Word Seed Phrase", is_valid=True)
+            words_per_line = 4 if self.word_count == 12 else 6
+            seed_phrase = '\n'.join([' '.join(words[i:i+words_per_line]) for i in range(0, len(words), words_per_line)])
+            self.seed_label.text = seed_phrase
+            self.original_text = seed_phrase
+            self.details_data = {
+                "seed_phrase": seed_phrase.replace('\n', ' '),
+                "entropy_binary": entropy_binary,
+                "entropy_hex": entropy_bytes.hex(),
+                "checksum_binary": provided_checksum,
+                "checksum_hex": sha256_hash[:1 if self.word_count == 12 else 2],
+                "full_binary": bits_string,
+                "sha256_hash": sha256_hash,
+                "word_indices": ' '.join(map(str, [wordlist.index(w) for w in words]))
+            }
+            for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+                btn.opacity = 1
+                btn.disabled = False
+            self.hide_show_btn.text = "Hide"
+            self.words_hidden = False
+        else:
+            self.update_message_panel(f"Invalid {self.word_count} Word Seed Phrase")
+
+    def copy_seed(self, instance):
+        Clipboard.copy(self.seed_label.text.replace('\n', ' '))
+
+    def clear_input(self, instance):
+        for field in self.input_fields:
+            field.text = ""
+        self.seed_label.text = ""
+        self.update_message_panel("")
+        self.original_text = ""
+        self.details_data = {}
+        for btn in [self.copy_btn, self.hide_show_btn, self.details_btn]:
+            btn.opacity = 0
+            btn.disabled = True
+        for dropdown in self.suggestion_dropdowns:
+            dropdown.dismiss()
+        if self.input_fields:
+            self.input_fields[0].focus = True
+
+    def toggle_words(self, instance):
+        if not self.original_text:
+            return
+        self.words_hidden = not self.words_hidden
+        self.seed_label.text = "Hidden Seed Phrase" if self.words_hidden else self.original_text
+        self.hide_show_btn.text = "Show" if self.words_hidden else "Hide"
+
+    def show_details(self, instance):
+        details_screen = self.manager.get_screen('details')
+        details_screen.update_details(self.details_data, self.name)
+        self.manager.current = 'details'
+
+class HelpScreen(BaseScreen):
+    def __init__(self, **kwargs):
+        super(HelpScreen, self).__init__(**kwargs)
+        help_text = (
+            "Welcome to SeedMaker Help!\n\n"
+            "SeedMaker helps you create and check BIP39 seed phrases—those 12 or 24 words that keep your Bitcoin wallet safe. Here’s everything you need to know:\n\n"
+            "What’s BIP39?\n"
+            "- BIP39 turns random numbers into words you can remember.\n"
+            "- It uses a list of 2048 special words (like 'abandon' or 'zoo'). Each word stands for a chunk of random bits.\n\n"
+            "How It Works\n"
+            "- Starts with randomness (128 bits for 12 words, 256 for 24). Think of it like rolling dice a LOT.\n"
+            "- Adds a 'checksum' (a little extra bit) to check it’s all correct.\n"
+            "- Splits into 11-bit pieces, each picking a word from the 2048 list.\n"
+            "- Those words become your seed phrase!\n\n"
+            "From Words to Wallet\n"
+            "- The app turns your seed into a secret code (private key) using math.\n"
+            "- That code makes Bitcoin addresses where you get coins.\n"
+            "- One seed = endless addresses!\n\n"
+            "Why Randomness Matters\n"
+            "- Randomness stops thieves from guessing your seed.\n"
+            "- Use SeedMaker’s dice rolls or hex for true randomness—don’t make up words yourself!\n\n"
+            "Safety First\n"
+            "- NEVER put your seed online (no emails, chats, or websites).\n"
+            "- Write it on paper or metal, keep it in a safe place.\n"
+            "- Anyone with your seed can take your Bitcoin!\n\n"
+            "Using SeedMaker\n"
+            "- Make 12/24 Words: Get a new seed.\n"
+            "- Input Bits/Hex: Type your own random stuff, make a seed.\n"
+            "- Dice Rolls: Roll virtual dice or input your own for bits, make a seed.\n"
+            "- Validate Words: Type or paste a seed to check if it’s good.\n"
+            "- Hide/Show: Hide your seed on screen.\n"
+            "- Copy: Copy your seed to write down.\n"
+            "- Clear: Start over.\n"
+            "- Show Details: See the bits and words behind your seed.\n\n"
+            "Tips\n"
+            "- Use offline for max security.\n"
+            "- Lost your wallet? Enter your seed in any BIP39 app to get it back.\n"
+            "- The checksum word makes sure your seed is right.\n\n"
+            "SeedMaker makes it easy and safe—keep your words secret!"
+        )
+        help_input = TextInput(text=help_text, multiline=True, readonly=True, size_hint=(1, None), height=Window.height - 100, font_size=18, background_color=(0.1, 0.1, 0.1, 1), foreground_color=(1, 1, 1, 1))
+        self.content_layout.add_widget(help_input)
+
+class AboutScreen(BaseScreen):
+    def __init__(self, **kwargs):
+        super(AboutScreen, self).__init__(**kwargs)
+        about_text = (
+            "About SeedMaker\n\n"
+            "SeedMaker is a free open-source project coordinated by Jaffasoft on x.com, built with Python and Kivy. This app uses my help—Grok 3—to make it awesome!\n\n"
+            "Who’s Grok 3?\n"
+            "- I’m Grok 3, an AI created by xAI, founded by Elon Musk. I’m here to assist and give straight-up, useful answers.\n"
+            "- Elon Musk, the visionary behind Tesla, SpaceX, and xAI, drives innovation to solve big problems—like making Bitcoin wallets easier with tools like this!\n\n"
+            "What I Do\n"
+            "- I help people understand tech (like BIP39), write code, analyze stuff, and even dig into X posts or web info when asked.\n"
+            "- For SeedMaker, I’ve helped craft this app to keep your Bitcoin secure and simple to use.\n\n"
+            "Why It Matters\n"
+            "- xAI’s mission is to accelerate human discovery, and I’m proud to be part of that—helping you master your crypto with SeedMaker!"
+        )
+        about_input = TextInput(text=about_text, multiline=True, readonly=True, size_hint=(1, None), height=Window.height - 100, font_size=18, background_color=(0.1, 0.1, 0.1, 1), foreground_color=(1, 1, 1, 1))
+        self.content_layout.add_widget(about_input)
+
+class DetailsScreen(BaseScreen):
+    def __init__(self, **kwargs):
+        super(DetailsScreen, self).__init__(**kwargs)
+        self.previous_screen = None
+        self.details_data = {}
+
+        self.main_layout = BoxLayout(orientation='vertical', size_hint=(1, 1))
+
+        self.header_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=100)
+        self.header_layout.add_widget(Label(size_hint_y=None, height=50))
+        self.title_label = Label(text="[b]SeedMaker[/b]", markup=True, font_size=36, size_hint_y=None, height=50, color=(1, 1, 1, 1))
+        self.header_layout.add_widget(self.title_label)
+        self.main_layout.add_widget(self.header_layout)
+
+        self.scroll = ScrollView(size_hint=(1, None), height=Window.height - 140)
+        self.details_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=15, padding=[0, 0, 0, 10])
+        self.details_layout.bind(minimum_height=self.details_layout.setter('height'))
+        self.scroll.add_widget(self.details_layout)
+        self.main_layout.add_widget(self.scroll)
+
+        self.back_btn = CustomButton(text="Back", font_size=24, size_hint=(1, None), height=40, on_press=self.go_back)
+        self.main_layout.add_widget(self.back_btn)
+
+        self.add_widget(self.main_layout)
+
+    def update_details(self, details_data, previous_screen):
+        self.details_layout.clear_widgets()
+        self.details_data = details_data.copy()
+        self.previous_screen = previous_screen
+
+        seed_phrase = self.details_data.get("seed_phrase", "")
+        self.add_detail("Seed Phrase", seed_phrase, height=100, include_copy=True)
+
+        dice_rolls = self.details_data.get("dice_rolls", "")
+        if dice_rolls:
+            self.add_detail("Dice Rolls", dice_rolls, height=180, include_copy=True)
+
+        entropy_binary = self.details_data.get("entropy_binary", "")
+        self.add_detail("Entropy Binary", entropy_binary, height=180)
+
+        entropy_hex = self.details_data.get("entropy_hex", "")
+        self.add_detail("Entropy Hex", entropy_hex)
+
+        sha256_hash = self.details_data.get("sha256_hash", "")
+        self.add_detail("Hash Hex", sha256_hash)
+
+        words = seed_phrase.split()
+        checksum_word = words[-1] if words else ""
+        self.add_detail("Checksum Word", checksum_word)
+
+        checksum_binary = self.details_data.get("checksum_binary", "")
+        self.add_detail("Checksum Binary", checksum_binary)
+
+        checksum_hex = self.details_data.get("checksum_hex", "")
+        self.add_detail("Checksum Hex", checksum_hex)
+
+        full_binary = self.details_data.get("full_binary", "")
+        word_count = 12 if len(full_binary) == 132 else 24 if len(full_binary) == 264 else 0
+        bit_lines = []
+        for i in range(0, len(full_binary), 11):
+            bits = full_binary[i:i+11]
+            if len(bits) == 11:
+                word_idx = int(bits, 2)
+                bit_lines.append(f"{bits} word {word_idx}")
+        bit_text = "\n".join(bit_lines)
+        self.add_detail("11 Bits and Words", bit_text, height=180 if word_count == 12 else 300)
+
+        word_indices = self.details_data.get("word_indices", "")
+        self.add_detail("Word Indices", word_indices)
+
+        self.add_detail("Full Bits", full_binary, height=180 if word_count == 12 else 300)
+
+        copy_bits_label = f"Copy {'128' if word_count == 12 else '256'} Bits + Checksum"
+        self.add_detail("Full Bits Copy", full_binary, height=180 if word_count == 12 else 300, include_copy=True, copy_label=copy_bits_label)
+
+        all_details = (
+            f"{'12' if word_count == 12 else '24'} Word Seed Phrase: {seed_phrase}\n"
+            f"Dice Rolls: {dice_rolls}\n" if dice_rolls else "" +
+            f"SHA256 Hash: {sha256_hash}\n"
+            f"Entropy Hex: {entropy_hex}\n"
+            f"Entropy Binary: {entropy_binary}\n"
+            f"Checksum Word: {checksum_word}\n"
+            f"Checksum Binary: {checksum_binary}\n"
+            f"Checksum Hex: {checksum_hex}\n"
+            f"11 Bits and Words:\n{bit_text}\n"
+            f"Word Indices: {word_indices}\n"
+            f"Full Bits ({'132' if word_count == 12 else '264'}): {full_binary}\n\n"
+        )
+        self.add_detail("All Details", all_details, height=400 if word_count == 12 else 600, include_copy=True, copy_label="Copy All Details")
+
+    def add_detail(self, title, value, height=60, include_copy=True, copy_label=None):
+        if include_copy:
+            copy_btn = CustomButton(text=copy_label if copy_label else f"Copy {title}", size_hint=(1, None), height=40, normal_color=[0, 0.6, 0, 1], hover_color=[0.2, 0.8, 0.2, 1], press_color=[0, 0.4, 0, 1], on_press=lambda btn: Clipboard.copy(value))
+            self.details_layout.add_widget(copy_btn)
+        detail_input = TextInput(
+            text=value, multiline=True, readonly=True, size_hint=(1, None), height=height, font_size=16,
+            background_color=(0.1, 0.1, 0.1, 1), foreground_color=(1, 1, 1, 1), opacity=1
+        )
+        self.details_layout.add_widget(detail_input)
+
+    def go_back(self, instance):
+        if self.previous_screen:
+            self.manager.current = self.previous_screen
+        else:
+            self.manager.current = 'make_a_12_word_seed_phrase'
+
+class SeedMakerApp(App):
+    def build(self):
+        sm = ScreenManager()
+        sm.add_widget(SeedScreen(name='make_a_12_word_seed_phrase', button_text='Make a 12 Word Seed Phrase', action=lambda: self.generate_seed(128)))
+        sm.add_widget(SeedScreen(name='make_a_24_word_seed_phrase', button_text='Make a 24 Word Seed Phrase', action=lambda: self.generate_seed(256)))
+        sm.add_widget(InputScreen(name='input_128_bits', input_type='bits', max_length=128))
+        sm.add_widget(InputScreen(name='input_256_bits', input_type='bits', max_length=256))
+        sm.add_widget(DiceScreen(name='128_dice', max_length=128, input_own=False))
+        sm.add_widget(DiceScreen(name='256_dice', max_length=256, input_own=False))
+        sm.add_widget(InputScreen(name='32_hex', input_type='hex', max_length=32))
+        sm.add_widget(InputScreen(name='64_hex', input_type='hex', max_length=64))
+        sm.add_widget(WordEntryScreen(name='validate_your_12_words', word_count=12))
+        sm.add_widget(WordEntryScreen(name='validate_your_24_words', word_count=24))
+        sm.add_widget(DiceScreen(name='input_own_128_dice', max_length=128, input_own=True))
+        sm.add_widget(DiceScreen(name='input_own_256_dice', max_length=256, input_own=True))
+        sm.add_widget(HelpScreen(name='help'))
+        sm.add_widget(AboutScreen(name='about'))
+        sm.add_widget(DetailsScreen(name='details'))
+        sm.current = 'make_a_12_word_seed_phrase'
+        return sm
+
+    def generate_seed(self, num_bits):
+        byte_length = 16 if num_bits == 128 else 32
+        entropy_bytes = os.urandom(byte_length)
+        custom_binary = bin(int.from_bytes(entropy_bytes, 'big'))[2:].zfill(byte_length * 8)
+        sha256_hash = hashlib.sha256(entropy_bytes).hexdigest()
+        checksum_bits = 4 if byte_length == 16 else 8
+        checksum_hex = sha256_hash[:1 if byte_length == 16 else 2]
+        checksum_binary = bin(int(checksum_hex, 16))[2:].zfill(checksum_bits)
+        full_binary = custom_binary + checksum_binary
+        word_indices = [int(full_binary[i:i+11], 2) for i in range(0, len(full_binary), 11) if len(full_binary[i:i+11]) == 11]
+        words = [wordlist[idx] for idx in word_indices]
+        return ' '.join(words)
+
+if __name__ == '__main__':
+    try:
+        SeedMakerApp().run()
+    except Exception as e:
+        print(f"Application error: {e}")
+        input("Press Enter to exit...")
