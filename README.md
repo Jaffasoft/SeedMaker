@@ -1,3 +1,33 @@
+
+
+!!!! WARNING !!!!!
+
+***** THIS IS DEADLY IMPORTANT... DO NOT USE THIS SCRIPT OR KIVY OR ANY ONLINE 12 OR 24 WORD SEED PHRASE GENERATOR TO MAKE YOUR OWN SEED ONLINE!*****
+
+DONT EVEN USE THIS OFFLINE TO GENERATE A SEED!!
+NEVER USE AN ONLINE SCRIPT OF DIGITAL DICE ROLL OR ANYTHING ONLINE AT ALL FOR THAT MATTER.
+PEOPLE HAVE BEEN HACKED USING THESE TYPE OF SCRIPTS ONLINE AND IN HARDWARE DEVICES. ONLY USE THESE SCRIPTS TO LEARN 
+THE SAME GOES FOR ALL THE SPREADSHEETS IN MY REPOSITORY. I CREATED THEM SO THAT YOU CAN SEE AND UNDERSTAND HOW 
+THE MATH WORKS UNDER THE HOOD TO GIVE YOU A BETTER UNDERSTANDING. BUT IT IS HIGHLY POSSIBLE THAT IT IS NOT PERFECT
+AS I AM NOT A CRYPTOGRAPHIC EXPERT OR A CODER. THESE SCRIPTS WERE WRITTEN 100% BY GROK3 I DID NOTHING JUST ASKED IT QUESTIONS. 
+EVEN IF THE SEEDS ARE GOOD THE PROBEL IS ALSO THAT A HASKER CAN JUST SEE WHIT A KEYLOGGER OR OTHER WAY TO HACK YOUR SEED PHRASE IF DONE ONLINE.
+ONLINE IS NO GO ZONE. 
+
+SO HOW DO I DO A 12 OR 24 WORD SEED "PROPERLY"? 
+BE SMART AND TAKE THE TIME, SIT DOWN AT A GOOD OLD FASHIONED TABLE GET A REAL 6 SIDED DICE OR DICES AND ROLL IT
+128 TIMES OR 256 TIMES FOR 24 WORDS AND SO THE MATH IS DONE IN YOUR HEAD (NOT ON A COMPUTER). STUDY THE SPREADSHEETS ON HOW TO DO IT. 
+REFER TO THE SPREADSHEETS AND GET THE BLANK SHEET PRINT IT AND GO ABOUT FILLING IT WITH YOUR DICE ROLL RESULTS. IF IT IS AN ODD NUMBER 
+PUT A 1 IF IT IS A EVEN NUMBER PUT A 0 UNTILL YOU HAVE 11 BITS FOR EACH WORD AND 4 BITS FOR THE LAST WORD. REFER TO THE SPREADSHEETS
+TO SEE HOW TO CALCULATE THE WORDS FROM THE 2048 IN THE LIST. 
+
+I KNOW IT IS A PAIN AND WE LIKE TO USE COMPUTERS TO DO THINGS EASY BUT JUST TAKE AN HR OF YOUR TIME FOR THE SACK OF SECURITY AND DO
+THIS'LIFE SKILL WHICH WILL SERVE YOU WELL FOR YEARS TO COME. 
+
+
+
+
+
+
 GROK3 Description:
 
 SeedMaker - A Cryptographically Secure BIP-39 Seed Phrase Generator and Validator
@@ -82,3 +112,6 @@ Instructions to use the Python code>>>
 To use it copy the entire code and paste into a regular notepad on Windows PC or Laptop, i haven't tried Apple Mac or Linux but it should work and save the notepad file as SeedMaker.py make sure it is note saved with .txt extension it should be file_name.py so it opens with python. Trick:  If you double click on the file SeedMaker.py it auto opens the APP and it will be instantly usable on screen to have play with.  
 
 You need to have Python installed on you computer and i think Kivy as well. Sorry i am not fully confident with all this as i just followed the directions of GROK to do it all. Search how to make a Kivy app using a Python code file in Google or GROK or another AI and it will talk you through the step even if you don't know how it's amazing and easy if i could do it never done it before and in 48hrs this whole program was built.
+
+
+Disclaimer: I accept no resposibility to any lost cyrpto or Bitcoin if anyone uses this script to generate a wallet see phrase in a wallet for crypto or from any hardware of software wallet in any way. Do not use any these scripts in any REAL wallet software. These scripts are for online learning purposes only NOT to be used in any real cryptocurrentcy wallet. 
